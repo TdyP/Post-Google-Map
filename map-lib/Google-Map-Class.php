@@ -1,17 +1,21 @@
 <?php
 class GMP_Google_Map {
+    protected $display_all = false;
 
-    public function __construct() {
+    public function __construct($params = array()) {
+        if(isset($params['display_all'])) {
+            $this->display_all = $params['display_all'];
+        }
     }
 
     public function run( $height, $id ) {
 		$this->element_id = $id;
-		$this->display_map( $height );
         add_action( 'wp_footer', array( $this, 'javascript_include' ) );
+		return $this->display_map( $height );
     }
 
     public function display_map( $height='650', $id='map_canvas' ) {
-		echo '<div id="'.esc_attr( $this->element_id ).'" style="height:' .absint( $height ) .'px;"></div>';
+		return '<div id="'.esc_attr( $this->element_id ).'" style="height:' .absint( $height ) .'px;"></div>';
     }
 
     public function javascript_include() {
@@ -75,37 +79,55 @@ class GMP_Google_Map {
     public function build_marker_javascript( $class = '' ) {
         global $post, $wpdb;
 
-		$gmp_arr = get_post_meta( $post->ID, 'gmp_arr', false );
+        if($this->display_all) { // Retrive meta from all posts => mash up all maps
+            $query = "SELECT post_id, meta_value FROM $wpdb->postmeta WHERE meta_key='gmp_arr'";
+            $res = $wpdb->get_results($query);
+            foreach ($res as $row) {
+                $rowData = unserialize($row->meta_value);
+                $rowData['post_id'] = $row->post_id;
+                $gmp_arr[] = $rowData;
+            }
+        }
+        else {
+		  $gmp_arr = get_post_meta( $post->ID, 'gmp_arr', false );
+        }
+
 
         for ( $row = 0; $row < count( $gmp_arr ); $row++ ) {
+            $post_id = isset($gmp_arr[$row]['post_id']) ? $gmp_arr[$row]['post_id'] : $post->ID;
 
             $title      = $gmp_arr[$row]["gmp_title"];
             $desc       = $gmp_arr[$row]["gmp_description"];
             $lat        = $gmp_arr[$row]["gmp_lat"];
             $lng        = $gmp_arr[$row]["gmp_long"];
             $address    = $gmp_arr[$row]["gmp_address1"];
+            $address2   = $gmp_arr[$row]["gmp_address2"];
+            $marker     = $gmp_arr[$row]["gmp_marker"];
 
-            $location_id    = $post->ID;
-            $featimg        = $this->get_listing_thumbnail( NULL, $post->ID );
-            $entry_url      = get_permalink( $post->ID );
-            $post_type      = get_post_type( $post );
-            $html           = $post->post_content;
+            $location_id    = $post_id;
+            $featimg        = $this->get_listing_thumbnail( NULL, $post_id );
+            $entry_url      = get_permalink( $post_id );
+            $post_type      = get_post_field('post_type',$post_id); // get_post_type( $post );
+            $html           = get_post_field('post_content',$post_id);
 
             if ( $lat && $lng ) {
 
                 $args[$row]=array(
-                    'post_id'	=> $post->ID,
-                    'post_type' => get_post_type( $post ),
-                    'address'	=> $address,
+                    'post_id'	=> $post_id,
+                    'post_type' => $post_type,
+                    'address_title' => $title,
+                    'address'   => $address,
+                    'address2'	=> $address2,
                     'lat'		=> $lat,
                     'lng'		=> $lng,
                     'url'		=> $entry_url,
                     'img'		=> $featimg,
-                    'title'		=> htmlentities( $post->post_title, ENT_QUOTES ),
+                    'title'		=> htmlentities( get_post_field('post_title',$post_id), ENT_QUOTES ),
                     'html'		=> $html,
-                    'class'		=> $class
+                    'class'		=> $class,
+                    'marker'    => $marker,                    
+                    'desc'      => $desc,
                 );
-
             }
         }
 
@@ -137,16 +159,41 @@ class GMP_Google_Map {
 
             extract( $args, EXTR_OVERWRITE );
 
-			//$gmp_arr = get_post_meta( $post_id, 'gmp_arr', true );
-			$gmp_marker = ( !empty( $gmp_arr[ $markers ]['gmp_marker'] ) ) ? $gmp_arr[ $markers ]["gmp_marker"] : 'blue-dot.png';
-            $address = esc_js( $gmp_arr[ $markers ]['gmp_address1'] );
-            if ( !empty( $gmp_arr[ $markers ]['gmp_address2'] ) )
-                $address .= '<br/>' . esc_js( $gmp_arr[ $markers ]['gmp_address2'] );
+			$gmp_marker = ( !empty( $args['marker'] ) ) ? $args['marker'] : 'blue-dot.png';
+
+
+            $content = '<div><p>';
+
+
+            if( !empty( $args['address_title'] )) {
+                $content .= esc_js( $args['address_title'] ).'<br />';
+            }
+
+            if( !empty( $args['desc'] )) {
+                $content .= esc_js( $args['desc'] ).'<br />';
+            }
+
+            if(empty($args['address_title']) && empty($args['desc'])) {
+                $address = esc_js( $args['address'] );
+                if ( !empty( $args['address2'] ) )
+                    $address .= '<br/>' . esc_js( $args['address2'] );
+                
+                $content .= $address.'<br />';
+            }
+
+            // Add link a link where the post this address comes from
+            if($this->display_all)
+                $content .= '<a href=\"'.$args['url'].'\" title=\"'.$args['title'].'\">'.$args['title'].'</a>';
+
+            $content .= '</p></div>';
 
 			$return .= 'var icon = new google.maps.MarkerImage( "' . plugins_url( '/markers/' . $gmp_marker, dirname( __FILE__ ) ) . '");';
 
-            $content = $img . $title;
+            //$content = $img . $title;
             $id = absint( $post_id ) . '_' . $markers;
+
+            //TODO : on click on marker, close all others infoWindow
+
             $return .=
                 'var myLatLng = new google.maps.LatLng('.esc_js( $lat ).','.esc_js( $lng ).');
                 bounds.extend(myLatLng);
@@ -155,11 +202,12 @@ class GMP_Google_Map {
                     new google.maps.LatLng('.esc_js( $lat ).','.esc_js( $lng ).')
                 });
 
-                var contentString' . $id . ' = "<div><p>' . $address . '</p></div>";
+                var contentString' . $id . ' = "' . $content . '";
                 var infowindow' . $id . ' = new google.maps.InfoWindow({
                     content: contentString' . $id . '
                 });
                 google.maps.event.addListener(marker' . $id . ', "click", function() {
+                    console.log(\'lalala\');
                     infowindow' . $id . '.open(map, marker' . $id . ');
                 });';
             $markers++;

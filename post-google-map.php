@@ -42,16 +42,17 @@ function gmp_register_widget() {
 }
 
 //shortcode function
-function gmp_register_shortcode() {
+function gmp_register_shortcode($atts) {
 	global $gmp_display;
+
+	$params = shortcode_atts(array('display_all' => false),$atts);
 
 	$gmp_display = 'return';
 
 	//generate map for shortcode
-	$map = gmp_generate_map( '650', 'map_canvas_shortcode');
+	$map = gmp_generate_map( '650', 'map_canvas_shortcode', $params);
 
-	echo $map;
-
+	return $map;
 }
 
 //save/update post/page address fields from meta box
@@ -63,16 +64,19 @@ function gmp_add_new_address() {
 
 }
 
-function gmp_generate_map( $height='650', $id='map_canvas' ) {
+function gmp_generate_map( $height='650', $id='map_canvas' , $params = array()) {
 
 	//include the Google Map Class
 	include_once( plugin_dir_path( __FILE__ ) .'map-lib/Google-Map-Class.php' );
 
-	?><div id="google_map" class="paper shadow"><?php
-	$gmp_google_map = new GMP_Google_Map();
-	$gmp_google_map->run( absint( $height ), $id );
-	?></div><?php
+	$output = '<div id="google_map" class="paper shadow">';
 
+	$gmp_google_map = new GMP_Google_Map($params);
+	
+	$output .= $gmp_google_map->run( absint( $height ), $id );
+	$output .= '</div>';
+
+	return $output;
 }
 
 function gmp_meta_box_add() {
@@ -502,8 +506,7 @@ class gmp_map_widget extends WP_Widget {
 		if ( !empty( $title ) ) { echo $before_title . esc_html( $title ) . $after_title; };
 
 		//generate the map
-		gmp_generate_map( '200' );
-
+		echo gmp_generate_map( '200' );
 		// Reset Post Data
 		wp_reset_postdata();
 
